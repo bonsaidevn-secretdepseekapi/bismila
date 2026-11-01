@@ -9,7 +9,7 @@ function isTouchMobileDevice()
     return UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 end
 Settings = Settings
-Window = Window
+local Window
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- Persistent executor env (prefer getgenv over _G for reinject / cross-chunk state).
