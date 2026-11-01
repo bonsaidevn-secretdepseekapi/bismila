@@ -1,4 +1,4 @@
--- Booga Booga assistant (WindUI, anti-cheat aware: max speed 26, no fly, no long-range TP)
+-- Booga UI (WindUI, icons everywhere, latest widgets, theme switcher, no collapsible tabs)
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 TweenService = game:GetService("TweenService")
@@ -1532,7 +1532,7 @@ end
 function Window_ApplyMobileLayout()
     if __ASTER_WINDWINDOW then
         local viewport = workspace.CurrentCamera.ViewportSize
-        __ASTER_WINDWINDOW:SetSize(UDim2.fromOffset(math.min(660, viewport.X - 24), math.min(520, viewport.Y - 24)))
+        __ASTER_WINDWINDOW:SetSize(UDim2.fromOffset(math.min(760, viewport.X - 24), math.min(560, viewport.Y - 24)))
     end
     return
 end
@@ -1540,8 +1540,8 @@ end
 function Window_ApplyCompactMode()
     if __ASTER_WINDWINDOW then
         local viewport = workspace.CurrentCamera.ViewportSize
-        local height = UISettings.CompactMode and 420 or 520
-        __ASTER_WINDWINDOW:SetSize(UDim2.fromOffset(math.min(660, viewport.X - 24), math.min(height, viewport.Y - 24)))
+        local height = UISettings.CompactMode and 460 or 560
+        __ASTER_WINDWINDOW:SetSize(UDim2.fromOffset(math.min(760, viewport.X - 24), math.min(height, viewport.Y - 24)))
     end
     return
 end
@@ -1558,7 +1558,12 @@ end
 
 function boogaNotify(message)
     if __ASTER_WINDUI then
-        __ASTER_WINDUI:Notify({ Title = "Booga Booga", Content = tostring(message), Duration = 4 })
+        __ASTER_WINDUI:Notify({
+            Title = "Booga Booga",
+            Content = tostring(message),
+            Icon = "triangle-alert",
+            Duration = 4,
+        })
     else
         __ASTER_RUNTIME.pendingNotices = __ASTER_RUNTIME.pendingNotices or {}
         table.insert(__ASTER_RUNTIME.pendingNotices, tostring(message))
@@ -1729,6 +1734,22 @@ do -- WindUI controls and configuration bindings
     assert(factory, "WindUI: " .. tostring(compileError))
     local WindUI = factory()
     assert(type(WindUI) == "table" and type(WindUI.CreateWindow) == "function", "WindUI did not return its API")
+    local themePath = "BoogaWindUI/theme.txt"
+    local savedTheme = getAsterEnv().__BOOGA_UI_THEME or "Dark"
+    if type(readfile) == "function" and type(isfile) == "function" then
+        local ok, value = pcall(function()
+            if isfile(themePath) then
+                return readfile(themePath)
+            end
+            return nil
+        end)
+        if ok and type(value) == "string" and WindUI:GetThemes()[value] then
+            savedTheme = value
+        end
+    end
+    if not WindUI:GetThemes()[savedTheme] then
+        savedTheme = "Dark"
+    end
     local previous = getAsterEnv().__BOOGA_WIND_WINDOW
     if previous and type(previous.Destroy) == "function" then
         pcall(function()
@@ -1737,14 +1758,19 @@ do -- WindUI controls and configuration bindings
         end)
     end
     local WindWindow = WindUI:CreateWindow({
-        Title = "Booga Booga | ASTER",
-        Icon = "leaf",
+        Title = "Booga Booga",
+        Icon = "gamepad-2",
+        Author = "Assistant",
+        NewElements = true,
+        ElementsRadius = 12,
+        HidePanelBackground = true,
+        ShadowTransparency = 0.72,
         Folder = "BoogaWindUI",
-        Size = UDim2.fromOffset(660, 520),
+        Size = UDim2.fromOffset(760, 560),
         Transparent = true,
-        Theme = "Dark",
+        Theme = savedTheme,
         SideBarWidth = 170,
-        ToggleKey = Enum.KeyCode.RightShift,
+        ToggleKey = nil,
     })
     __ASTER_WINDUI = WindUI
     __ASTER_WINDWINDOW = WindWindow
@@ -1753,7 +1779,7 @@ do -- WindUI controls and configuration bindings
         boogaNotify(message)
     end
     __ASTER_RUNTIME.pendingNotices = nil
-    WindUI:SetTheme("Dark")
+    WindUI:SetTheme(savedTheme)
     GlobalTransparency = 0
     GradientsEnabled = false
     screenGui = nil
@@ -1788,6 +1814,16 @@ do -- WindUI controls and configuration bindings
         local selected = type(name) == "string" and themes[name] and name or "Dark"
         WindUI:SetTheme(selected)
         Settings.CurrentThemeName = selected
+        getAsterEnv().__BOOGA_UI_THEME = selected
+        if type(writefile) == "function" then
+            pcall(function()
+                if type(isfolder) == "function" and type(makefolder) == "function" and not isfolder("BoogaWindUI") then
+                    makefolder("BoogaWindUI")
+                end
+                writefile(themePath, selected)
+                return
+            end)
+        end
         return
     end
     function Window:UpdateTransparency(value)
@@ -1813,16 +1849,19 @@ do -- WindUI controls and configuration bindings
     }
     local tabs = {}
     Window.WindTabs = tabs
-    local tabOrder = { "Main", "Farm", "Combat", "Visuals", "Settings" }
+    local tabOrder = { "Main", "Farm", "Combat", "Visuals", "Movement", "Misc", "Settings" }
     local tabIcons = {
         Main = "house",
-        Farm = "sprout",
+        Farm = "wheat",
         Combat = "swords",
         Visuals = "eye",
-        Settings = "settings",
+        Movement = "footprints",
+        Misc = "puzzle",
+        Settings = "sliders-horizontal",
     }
     for _, name in ipairs(tabOrder) do
         tabs[name] = WindWindow:Tab({ Title = name, Icon = tabIcons[name] })
+        tabs[name].Gap = 7
     end
     local function groupName(title)
         if title == "Gold & Paths" or title == "Farming" or title == "Loot & Chests" then
@@ -1930,70 +1969,148 @@ do -- WindUI controls and configuration bindings
         end,
             entry
     end
+    function Window.IconFor(text)
+        local lower = string.lower(tostring(text))
+        local choices = {
+            { "save", "save" },
+            { "load", "folder-open" },
+            { "delete", "trash-2" },
+            { "remove", "trash-2" },
+            { "clear", "eraser" },
+            { "heal", "heart-pulse" },
+            { "speed", "gauge" },
+            { "tween", "move" },
+            { "path", "route" },
+            { "waypoint", "map-pin" },
+            { "record", "circle-dot" },
+            { "pickup", "hand" },
+            { "chest", "archive" },
+            { "plant", "sprout" },
+            { "harvest", "wheat" },
+            { "farm", "wheat" },
+            { "esp", "eye" },
+            { "camera", "video" },
+            { "freecam", "video" },
+            { "target", "crosshair" },
+            { "hit", "swords" },
+            { "aura", "shield" },
+            { "bow", "focus" },
+            { "craft", "anvil" },
+            { "buy", "shopping-cart" },
+            { "server", "globe" },
+            { "key", "keyboard" },
+            { "theme", "palette" },
+        }
+        for _, choice in ipairs(choices) do
+            if string.find(lower, choice[1], 1, true) then
+                return choice[2]
+            end
+        end
+        return "settings-2"
+    end
     local groups = {}
     function Window.GetSection(tabName, title)
         local key = tabName .. "/" .. title
         if not groups[key] then
-            groups[key] =
-                tabs[tabName]:Section({ Title = title, Opened = title == "Navigation" or title == "Movement" })
+            local icons = {
+                Navigation = "globe",
+                Routes = "route",
+                Pickup = "hand",
+                Storage = "archive",
+                Planting = "sprout",
+                Harvest = "wheat",
+                Targets = "crosshair",
+                Combat = "shield",
+                Healing = "heart-pulse",
+                Building = "hammer",
+                Archery = "focus",
+                Players = "users",
+                World = "map",
+                Appearance = "palette",
+                Speed = "gauge",
+                Travel = "move",
+                Camera = "video",
+                Automation = "repeat",
+                Crafting = "anvil",
+                Shop = "shopping-cart",
+                Tribe = "users",
+                Utilities = "wrench",
+                Theme = "palette",
+                Interface = "panels-top-left",
+                Keybinds = "keyboard",
+                Configs = "save",
+                Performance = "sliders-horizontal",
+            }
+            local tab = tabs[tabName]
+            tab:Space({ Columns = 1 })
+            tab:Section({ Title = title, Icon = icons[title] or "settings-2", TextXAlignment = "Left", TextSize = 18 })
+            groups[key] = tab:VStack({})
         end
         return groups[key]
     end
     local function destination(title, label)
         if label == "Server Teleports" then
             return "Main", "Navigation"
-        end
-        if label == "Keybind Manager" or label == "Mobile Buttons" then
+        elseif label == "Keybind Manager" or label == "Mobile Buttons" then
             return "Settings", "Keybinds"
-        end
-        if title == "Gold & Paths" then
+        elseif title == "Gold & Paths" then
             return "Farm", "Routes"
         elseif title == "Loot & Chests" then
-            return "Farm", "Pickup & Storage"
+            return "Farm", (label == "Chest Teleport" or label == "Delete") and "Storage" or "Pickup"
         elseif title == "Farming" then
-            return "Farm", "Planting"
+            return "Farm", label == "Performance" and "Harvest" or "Planting"
         elseif title == "Combat / PvP" then
-            if label == "Healing" then
-                return "Combat", "Healing"
-            elseif label == "Pinch Players" then
-                return "Combat", "Building"
-            end
-            return "Combat", "Targets & Combat"
+            local sections = {
+                Healing = "Healing",
+                ["Target Player"] = "Targets",
+                ["Pinch Players"] = "Building",
+                ["Auto Bolt"] = "Archery",
+                ["Bow Utilities"] = "Archery",
+            }
+            return "Combat", sections[label] or "Combat"
         elseif title == "ESP / Visuals" then
-            if label == "ESP Color" then
-                return "Visuals", "Appearance"
-            elseif label == "Players" then
-                return "Visuals", "Players"
-            end
-            return "Visuals", "World"
+            return "Visuals", label == "ESP Color" and "Appearance" or label == "Players" and "Players" or "World"
         elseif title == "Settings" then
-            if label == "Interface" or label == "Themes" or label == "Performance" then
+            if label == "Theme" then
+                return "Settings", "Theme"
+            elseif label == "Interface" then
                 return "Settings", "Interface"
+            elseif label == "Performance" then
+                return "Misc", "Performance"
             end
-            return "Settings", "Movement"
+            return "Movement", label == "Movement Extras" and "Travel" or "Speed"
         elseif title == "Configs" then
             return "Settings", "Configs"
         end
-        return "Main", "Automation"
+        local sections = {
+            ["Tribe"] = "Tribe",
+            ["Shop (Quick Buy)"] = "Shop",
+            ["Crafting"] = "Crafting",
+            ["Fuel / Utilities"] = "Utilities",
+        }
+        return "Misc", sections[label] or "Automation"
     end
     function Window:AddTab(config)
         local title = config.Title or "Main"
         local tabName, sectionTitle = destination(title)
-        local target = Window.GetSection(tabName, sectionTitle)
-        local api = { Title = title, Native = target }
+        local target = setmetatable({}, {
+            __index = function(_, method)
+                return function(_, config)
+                    local section = Window.GetSection(tabName, sectionTitle)
+                    return section[method](section, config)
+                end
+            end,
+        })
+        local api = { Title = title }
         function api:AddLabel(text)
             tabName, sectionTitle = destination(title, tostring(text))
-            target = Window.GetSection(tabName, sectionTitle)
-            api.Native = target
-            return {
-                SetText = function(self, value)
-                    return
-                end,
-            }
+            return
         end
         function api:AddButton(text, callback)
             local button = target:Button({
                 Title = text,
+                Icon = Window.IconFor(text),
+                IconAlign = "Left",
                 Callback = function()
                     if type(callback) == "function" then
                         local ok, message = pcall(callback)
@@ -2030,12 +2147,16 @@ do -- WindUI controls and configuration bindings
             })
         end
         function api:AddToggle(text, arg2, arg3)
+            if text == "FreeCam" or text == "Spectate Players" then
+                tabName, sectionTitle = "Movement", "Camera"
+            end
             local default = type(arg2) == "boolean" and arg2 or false
             local cb = type(arg2) == "function" and arg2 or arg3
             local ui
             local handler
             ui = target:Toggle({
                 Title = text,
+                Icon = Window.IconFor(text),
                 Value = default,
                 Default = default,
                 Callback = function(v)
@@ -2050,6 +2171,9 @@ do -- WindUI controls and configuration bindings
             return Window.ElementRegistry[text]
         end
         function api:AddSlider(text, lower, upper, default, arg5, arg6)
+            if text == "FreeCam Speed" then
+                tabName, sectionTitle = "Movement", "Camera"
+            end
             local step = type(arg5) == "number" and arg5 or 1
             local cb = type(arg5) == "function" and arg5 or arg6
             local title = tostring(text)
@@ -2064,7 +2188,8 @@ do -- WindUI controls and configuration bindings
             local ui
             local handler
             ui = target:Slider({
-                Title = title == "WalkSpeed" and "Speed (античит: max 26)" or title,
+                Title = title == "WalkSpeed" and "Speed" or title,
+                Icons = { From = "minus", To = Window.IconFor(title) },
                 Step = step,
                 Value = { Min = lower, Max = upper, Default = default },
                 Callback = function(v)
@@ -2174,6 +2299,70 @@ do -- WindUI controls and configuration bindings
             return Window.ElementRegistry[text]
         end
         function api:AddInput(text, default, cb)
+            if text == "UI Keybind" then
+                local function normalize(value)
+                    local aliases = {
+                        ctrl = "LeftControl",
+                        rctrl = "RightControl",
+                        alt = "LeftAlt",
+                        ralt = "RightAlt",
+                        shift = "LeftShift",
+                        rshift = "RightShift",
+                    }
+                    local lower = string.lower(tostring(value or ""))
+                    if aliases[lower] then
+                        return aliases[lower]
+                    end
+                    for _, key in ipairs(Enum.KeyCode:GetEnumItems()) do
+                        if string.lower(key.Name) == lower then
+                            return key.Name
+                        end
+                    end
+                    return "RightShift"
+                end
+                local oldListener = __ASTER_RUNTIME.connections.uiKeybind_InputBegan
+                if oldListener then
+                    oldListener:Disconnect()
+                    __ASTER_RUNTIME.connections.uiKeybind_InputBegan = nil
+                end
+                local control = Window.GetSection("Settings", "Keybinds"):Keybind({
+                    Title = "Toggle menu",
+                    Value = "RightShift",
+                    CanChange = true,
+                    Callback = function()
+                        Window.ToggleGUI()
+                        return
+                    end,
+                })
+                local entry = { Type = "Input", Control = control }
+                function entry.GetValue()
+                    return control.Value
+                end
+                function entry.SetValue(first, second)
+                    local value = first
+                    if first == entry then
+                        value = second
+                    end
+                    local key = normalize(value)
+                    control:Set(key)
+                    cb(key)
+                    return key
+                end
+                Window.ElementRegistry[text] = entry
+                trackConnection(
+                    "boogaUIKeyChanged",
+                    UserInputService.InputEnded:Connect(function()
+                        task.defer(function()
+                            if Settings.Keybind ~= control.Value then
+                                cb(control.Value)
+                            end
+                            return
+                        end)
+                        return
+                    end)
+                )
+                return entry
+            end
             local ui
             local handler
             ui = target:Input({
@@ -2293,10 +2482,19 @@ do -- AsterPostUI: scoped block avoids main-chunk local register limit
             return
         end
         if widget.mode == "action" then
-            control = Window.GetSection("Settings", "Keybinds"):Button({ Title = widget.label, Callback = click })
+            control = Window.GetSection("Settings", "Keybinds"):Button({
+                Title = widget.label,
+                Icon = Window.IconFor(widget.label),
+                IconAlign = "Left",
+                Callback = click,
+            })
         else
-            control = Window.GetSection("Settings", "Keybinds")
-                :Toggle({ Title = widget.label, Value = widget._isOn, Callback = click })
+            control = Window.GetSection("Settings", "Keybinds"):Toggle({
+                Title = widget.label,
+                Icon = Window.IconFor(widget.label),
+                Value = widget._isOn,
+                Callback = click,
+            })
         end
         function widget.setToggleState(value, label)
             widget._isOn = value == true
@@ -2644,6 +2842,8 @@ do -- AsterPostUI: scoped block avoids main-chunk local register limit
         end
         button = Window.GetSection("Settings", "Keybinds"):Button({
             Title = labelText,
+            Icon = "keyboard",
+            IconAlign = "Left",
             Callback = function()
                 ToggleBind.activeCapture = { setKey = setKey, refresh = refresh }
                 button:SetTitle(labelText .. ": press a key (Esc: cancel, Backspace: clear)")
@@ -2654,6 +2854,8 @@ do -- AsterPostUI: scoped block avoids main-chunk local register limit
         if opts.removable then
             removeButton = Window.GetSection("Settings", "Keybinds"):Button({
                 Title = "Remove " .. labelText .. " keybind",
+                Icon = "trash-2",
+                IconAlign = "Left",
                 Callback = function()
                     Settings.SelectedToggleKeybinds[opts.toggleName] = nil
                     Settings.ToggleKeybinds[opts.toggleName] = nil
@@ -2940,7 +3142,7 @@ do -- AsterPostUI: scoped block avoids main-chunk local register limit
         local label = type(config) == "table" and (config.Title or "Booga") or "Booga"
         local message = type(config) == "table" and (config.Content or config.Description or "") or tostring(config)
         pcall(function()
-            __ASTER_WINDUI:Notify({ Title = label, Content = tostring(message), Duration = 3 })
+            __ASTER_WINDUI:Notify({ Title = label, Content = tostring(message), Icon = "info", Duration = 3 })
 
             return
         end)
@@ -20267,7 +20469,7 @@ do -- AsterStaffDetection: scoped block avoids local register limit
         end
         local bodyText = buildBodyText(members)
         if bodyText and bodyText ~= "" then
-            __ASTER_WINDUI:Notify({ Title = alertTitle, Content = bodyText, Duration = 6 })
+            __ASTER_WINDUI:Notify({ Title = alertTitle, Content = bodyText, Icon = "triangle-alert", Duration = 6 })
         end
         return
     end
@@ -24849,6 +25051,8 @@ do -- AsterKeybindOverlay: scoped block avoids main-chunk local register limit
                 local name = entry.name
                 KO.rows[name] = Window.GetSection("Settings", "Keybinds"):Button({
                     Title = title,
+                    Icon = "keyboard",
+                    IconAlign = "Left",
                     Desc = "Clear keybind",
                     Callback = function()
                         hideKeybindOverlayItem(name)
@@ -27780,6 +27984,9 @@ do
 
     local suppressEspHexUpdate = false
     local function setEspColorControls(c)
+        if ASTER.Options.ESPColorPicker then
+            ASTER.Options.ESPColorPicker:Set(c)
+        end
         if Window.ElementRegistry["ESP Red"] then
             Window.ElementRegistry["ESP Red"].SetValue(c.R * 255)
         end
@@ -27872,6 +28079,14 @@ do
         1,
         ASTER.Options.updateColor
     )
+    ASTER.Options.ESPColorPicker = Window.GetSection("Visuals", "Appearance"):Colorpicker({
+        Title = "ESP color",
+        Default = Settings.ESPColors["PlayerESP"],
+        Callback = function(color)
+            Window.ElementRegistry["ESP Hex"].SetValue(colorToHex(color))
+            return
+        end,
+    })
 end
 
 do
@@ -30154,6 +30369,8 @@ do
         end
         spectateButton = Window.GetSection("Visuals", "Players"):Button({
             Title = "Spectate selected player",
+            Icon = "eye",
+            IconAlign = "Left",
             Callback = function()
                 local targetPlayer = getActionPanelTargetPlayer(getActionPanel())
                 if not targetPlayer then
@@ -30469,13 +30686,13 @@ do
         return
     end)
 
-    ASTER.Tabs.Settings:AddLabel("Interface")
+    ASTER.Tabs.Settings:AddLabel("Theme")
     local nativeThemes = {}
     for name in pairs(__ASTER_WINDUI:GetThemes()) do
         table.insert(nativeThemes, name)
     end
     table.sort(nativeThemes)
-    ASTER.Tabs.Settings:AddDropdown("WindUI Theme", nativeThemes, "Dark", function(name)
+    ASTER.Tabs.Settings:AddDropdown("WindUI Theme", nativeThemes, __ASTER_WINDUI:GetCurrentTheme(), function(name)
         Window:UpdateTheme(name)
         return
     end)
@@ -30538,7 +30755,7 @@ do -- AsterFinalize: scoped block avoids main-chunk local register limit
     boogaStartMovement()
 
     startWalkSpeedEnforcer()
-    Window:UpdateTheme(Settings.CurrentThemeName or "Dark")
+    Window:UpdateTheme(__ASTER_WINDUI:GetCurrentTheme())
     Window_ApplyCompactMode()
     __ASTER_WINDWINDOW:SelectTab(1)
     __ASTER_WINDWINDOW:Open()
@@ -30747,59 +30964,12 @@ do -- AsterFinalize: scoped block avoids main-chunk local register limit
         task.defer(enforceRemovedFeatureStates)
         task.delay(1, enforceRemovedFeatureStates)
     end
-
-    -- // UI KEYBIND LISTENER // --
-    trackConnection(
-        "uiKeybind_InputBegan",
-        game:GetService("UserInputService").InputBegan:Connect(function(input, gameProcessed)
-            if gameProcessed then
-                return
-            end
-
-            -- Ignore while typing in ASTER text fields (search, UI keybind input, etc.)
-            local focused = UserInputService:GetFocusedTextBox()
-            if focused and screenGui and focused:IsDescendantOf(screenGui) then
-                return
-            end
-
-            local keyName = input.KeyCode.Name
-            local bind = Settings.Keybind
-            if not bind or bind == "" then
-                return
-            end
-            local lowerBind = tostring(bind):lower()
-            local lowerKey = keyName:lower()
-
-            -- Direct Match (Case Insensitive)
-            if lowerKey == lowerBind then
-                if Window.ToggleGUI then
-                    Window.ToggleGUI(true)
-                end
-                return
-            end
-
-            -- Alias Handling (ctrl, rctrl, alt, ralt, shift, rshift)
-            if
-                (lowerBind == "ctrl" and keyName == "LeftControl")
-                or (lowerBind == "rctrl" and keyName == "RightControl")
-                or (lowerBind == "alt" and keyName == "LeftAlt")
-                or (lowerBind == "ralt" and keyName == "RightAlt")
-                or (lowerBind == "shift" and keyName == "LeftShift")
-                or (lowerBind == "rshift" and keyName == "RightShift")
-            then
-                if Window.ToggleGUI then
-                    Window.ToggleGUI(true)
-                end
-            end
-
-            return
-        end)
-    )
 end -- AsterFinalize
 
 __ASTER_WINDUI:Notify({
     Title = "Booga Booga",
+    Icon = "check",
     Content = "Loaded. Speed limited to 26; travel steps limited to 4 studs.",
     Duration = 4,
 })
-print("[Booga] Loaded")
+print("[Booga UI] Loaded")
