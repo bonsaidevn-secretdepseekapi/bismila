@@ -1234,68 +1234,7 @@ function sendVoodooPacket(targetPos)
     return
 end
 
--- // Theme Definitions // --
-Themes = {
-    Nebula = {
-        Main = Color3.fromRGB(170, 0, 255),
-        Gradient = true,
-        Colors = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(96, 31, 158)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(170, 0, 255)),
-        }),
-        Background = Color3.fromRGB(10, 5, 20), -- Deep purple-black
-    },
-    Midnight = {
-        Main = Color3.fromRGB(0, 220, 255),
-        Gradient = true,
-        Colors = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 200, 255)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 139, 139)),
-        }),
-        Background = Color3.fromRGB(5, 10, 20), -- Deep blue-black
-    },
-    Acid = {
-        Main = Color3.fromRGB(200, 255, 0),
-        Gradient = true,
-        Colors = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(190, 255, 0)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(98, 146, 1)),
-        }),
-        Background = Color3.fromRGB(15, 20, 5), -- Deep green-black
-    },
-    Sunset = {
-        Main = Color3.fromRGB(255, 30, 160),
-        Gradient = true,
-        Colors = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 50, 150)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 180, 60)),
-        }),
-        Background = Color3.fromRGB(20, 10, 5), -- Deep red-black
-    },
-
-    Starfield = {
-        Main = Color3.fromRGB(220, 220, 255),
-        Gradient = true,
-        Colors = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(220, 220, 255)),
-            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(150, 180, 255)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 180, 220)),
-        }),
-        Background = Color3.fromRGB(0, 0, 0),
-        Stars = true,
-    },
-    Premium = {
-        Main = Color3.fromRGB(186, 140, 255),
-        Gradient = true,
-        Colors = ColorSequence.new({
-            ColorSequenceKeypoint.new(0, Color3.fromRGB(120, 80, 200)),
-            ColorSequenceKeypoint.new(0.5, Color3.fromRGB(186, 140, 255)),
-            ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 180, 230)),
-        }),
-        Background = Color3.fromRGB(10, 8, 16),
-        AccentGlow = Color3.fromRGB(186, 140, 255),
-    },
-}
+CurrentTheme = { Main = Color3.fromRGB(0, 145, 255), Background = Color3.fromRGB(16, 16, 16) }
 
 -- Premium UI design tokens (spacing, motion, surfaces)
 UI = {
@@ -1526,7 +1465,7 @@ function refreshThemeSurfaces()
     UI.Surface.Stroke = Color3.fromRGB(50, 50, 50)
     UI.Surface.Muted = Color3.fromRGB(170, 170, 170)
     UI.Surface.Text = Color3.new(1, 1, 1)
-    local theme = CurrentTheme or Themes.Starfield
+    local theme = CurrentTheme
     UI.Surface.Deep = theme.Background or Color3.fromRGB(12, 12, 12)
 
     return
@@ -1633,11 +1572,9 @@ function boogaSetSpeed(hum, speed)
     end
     local wanted = math.clamp(tonumber(speed) or 16, 16, 26)
     __ASTER_RUNTIME.speedRequests = __ASTER_RUNTIME.speedRequests or setmetatable({}, { __mode = "k" })
-    if __ASTER_RUNTIME.speedRequests[hum] ~= wanted then
-        __ASTER_RUNTIME.speedRequests[hum] = wanted
-        if hum.WalkSpeed ~= wanted then
-            hum.WalkSpeed = wanted
-        end
+    __ASTER_RUNTIME.speedRequests[hum] = wanted
+    if hum.WalkSpeed ~= wanted then
+        hum.WalkSpeed = wanted
     end
     return
 end
@@ -1647,13 +1584,17 @@ function boogaBindCharacter(character)
     if not hum or character ~= plr.Character or __ASTER_RUNTIME.sessionId ~= CURRENT_SESSION then
         return
     end
-    __ASTER_RUNTIME.movementRequest = nil
+    boogaStopMovement()
     boogaSetSpeed(hum, Settings.WalkSpeedEnabled and Settings.WalkSpeed or 16)
     trackConnection(
         "boogaSpeedLimit",
         hum:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
-            if hum.WalkSpeed > 26 then
-                hum.WalkSpeed = 26
+            local wanted = Settings.WalkSpeedEnabled and Settings.WalkSpeed
+                or (__ASTER_RUNTIME.speedRequests and __ASTER_RUNTIME.speedRequests[hum])
+                or 16
+            wanted = math.clamp(tonumber(wanted) or 16, 16, 26)
+            if hum.WalkSpeed ~= wanted then
+                hum.WalkSpeed = wanted
             end
             return
         end)
@@ -1661,20 +1602,43 @@ function boogaBindCharacter(character)
     return
 end
 
-function boogaStopMovement()
+function boogaStopMovement(owner)
     local request = __ASTER_RUNTIME.movementRequest
+    if owner and (not request or request.owner ~= owner) then
+        return
+    end
     __ASTER_RUNTIME.movementRequest = nil
+    if __ASTER_RUNTIME.movementTween then
+        __ASTER_RUNTIME.movementTween:Cancel()
+        __ASTER_RUNTIME.movementTween = nil
+    end
     if request and request.hum.Parent and request.root.Parent then
         request.hum:MoveTo(request.root.Position)
+        boogaSetSpeed(request.hum, Settings.WalkSpeedEnabled and Settings.WalkSpeed or 16)
     end
     return
 end
 
-function boogaMoveTo(root, hum, target, speed)
+function boogaMoveTo(root, hum, target, speed, mode, owner)
     if not root or not hum or not root.Parent or hum.Health <= 0 or typeof(target) ~= "Vector3" then
         return false
     end
-    __ASTER_RUNTIME.movementRequest = { root = root, hum = hum, target = target, expires = os.clock() + 0.35 }
+    local travelSpeed = math.clamp(tonumber(speed) or 16, 1, 26)
+    local wanted = Settings.WalkSpeedEnabled and Settings.WalkSpeed or travelSpeed
+    local previous = __ASTER_RUNTIME.movementRequest
+    if not previous or previous.hum ~= hum or previous.walkSpeed ~= wanted then
+        boogaSetSpeed(hum, wanted)
+    end
+    __ASTER_RUNTIME.movementRequest = {
+        root = root,
+        hum = hum,
+        target = target,
+        speed = travelSpeed,
+        walkSpeed = wanted,
+        mode = mode or "Walk",
+        owner = owner or "Utility",
+        expires = os.clock() + 1,
+    }
     return true
 end
 
@@ -1687,6 +1651,10 @@ function boogaStartMovement()
     task.spawn(function()
         while __ASTER_RUNTIME.sessionId == session do
             local request = __ASTER_RUNTIME.movementRequest
+            if __ASTER_RUNTIME.movementTween then
+                __ASTER_RUNTIME.movementTween:Cancel()
+                __ASTER_RUNTIME.movementTween = nil
+            end
             if request then
                 local root, hum = request.root, request.hum
                 if
@@ -1700,10 +1668,14 @@ function boogaStartMovement()
                 else
                     local delta = request.target - root.Position
                     local horizontal = Vector3.new(delta.X, 0, delta.Z)
-                    if horizontal.Magnitude > 0.1 then
-                        local step = horizontal.Unit * math.min(4, horizontal.Magnitude)
+                    if horizontal.Magnitude <= 0.2 then
+                        boogaStopMovement()
+                    else
+                        local tweening = request.mode == "Tween"
+                        local maxStep = tweening and math.min(4, request.speed * 0.1) or 4
+                        local step = horizontal.Unit * math.min(maxStep, horizontal.Magnitude)
                         local nextPosition = root.Position + step
-                        if Settings.FastStepEnabled then
+                        if tweening or Settings.FastStepEnabled then
                             local params = RaycastParams.new()
                             params.FilterType = Enum.RaycastFilterType.Exclude
                             params.FilterDescendantsInstances = { plr.Character }
@@ -1712,15 +1684,24 @@ function boogaStartMovement()
                             local ground = workspace:Raycast(nextPosition, Vector3.new(0, -6, 0), params)
                             if not obstacle and ground and hum.FloorMaterial ~= Enum.Material.Air then
                                 hum:MoveTo(root.Position)
-                                root.CFrame = CFrame.new(nextPosition) * root.CFrame.Rotation
+                                local destination = CFrame.new(nextPosition) * root.CFrame.Rotation
+                                if tweening then
+                                    local tween = TweenService:Create(
+                                        root,
+                                        TweenInfo.new(0.1, Enum.EasingStyle.Linear),
+                                        { CFrame = destination }
+                                    )
+                                    __ASTER_RUNTIME.movementTween = tween
+                                    tween:Play()
+                                else
+                                    root.CFrame = destination
+                                end
                             else
                                 hum:MoveTo(nextPosition)
                             end
                         else
                             hum:MoveTo(nextPosition)
                         end
-                    else
-                        boogaStopMovement()
                     end
                 end
             end
@@ -1772,7 +1753,7 @@ do -- WindUI controls and configuration bindings
         boogaNotify(message)
     end
     __ASTER_RUNTIME.pendingNotices = nil
-    CurrentTheme = Themes.Premium
+    WindUI:SetTheme("Dark")
     GlobalTransparency = 0
     GradientsEnabled = false
     screenGui = nil
@@ -1802,9 +1783,12 @@ do -- WindUI controls and configuration bindings
     function makeMobileDraggable(frame, button, callback)
         return nil
     end
-    function Window:UpdateTheme(theme)
-        WindUI:SetTheme("Dark")
-        return nil
+    function Window:UpdateTheme(name)
+        local themes = WindUI:GetThemes()
+        local selected = type(name) == "string" and themes[name] and name or "Dark"
+        WindUI:SetTheme(selected)
+        Settings.CurrentThemeName = selected
+        return
     end
     function Window:UpdateTransparency(value)
         pcall(function()
@@ -1946,28 +1930,64 @@ do -- WindUI controls and configuration bindings
         end,
             entry
     end
+    local groups = {}
+    function Window.GetSection(tabName, title)
+        local key = tabName .. "/" .. title
+        if not groups[key] then
+            groups[key] =
+                tabs[tabName]:Section({ Title = title, Opened = title == "Navigation" or title == "Movement" })
+        end
+        return groups[key]
+    end
+    local function destination(title, label)
+        if label == "Server Teleports" then
+            return "Main", "Navigation"
+        end
+        if label == "Keybind Manager" or label == "Mobile Buttons" then
+            return "Settings", "Keybinds"
+        end
+        if title == "Gold & Paths" then
+            return "Farm", "Routes"
+        elseif title == "Loot & Chests" then
+            return "Farm", "Pickup & Storage"
+        elseif title == "Farming" then
+            return "Farm", "Planting"
+        elseif title == "Combat / PvP" then
+            if label == "Healing" then
+                return "Combat", "Healing"
+            elseif label == "Pinch Players" then
+                return "Combat", "Building"
+            end
+            return "Combat", "Targets & Combat"
+        elseif title == "ESP / Visuals" then
+            if label == "ESP Color" then
+                return "Visuals", "Appearance"
+            elseif label == "Players" then
+                return "Visuals", "Players"
+            end
+            return "Visuals", "World"
+        elseif title == "Settings" then
+            if label == "Interface" or label == "Themes" or label == "Performance" then
+                return "Settings", "Interface"
+            end
+            return "Settings", "Movement"
+        elseif title == "Configs" then
+            return "Settings", "Configs"
+        end
+        return "Main", "Automation"
+    end
     function Window:AddTab(config)
         local title = config.Title or "Main"
-        local target = tabs[groupName(title)]:Section({ Title = title, Opened = true })
-        Window.SectionAnchors[title] = target
+        local tabName, sectionTitle = destination(title)
+        local target = Window.GetSection(tabName, sectionTitle)
         local api = { Title = title, Native = target }
         function api:AddLabel(text)
-            local section
-            pcall(function()
-                section = target:Section({ Title = tostring(text) })
-
-                return
-            end)
+            tabName, sectionTitle = destination(title, tostring(text))
+            target = Window.GetSection(tabName, sectionTitle)
+            api.Native = target
             return {
                 SetText = function(self, value)
-                    if section and section.SetTitle then
-                        pcall(function()
-                            section:SetTitle(tostring(value))
-
-                            return
-                        end)
-                    end
-                    return nil
+                    return
                 end,
             }
         end
@@ -2273,9 +2293,10 @@ do -- AsterPostUI: scoped block avoids main-chunk local register limit
             return
         end
         if widget.mode == "action" then
-            control = Window.WindTabs.Main:Button({ Title = widget.label, Callback = click })
+            control = Window.GetSection("Settings", "Keybinds"):Button({ Title = widget.label, Callback = click })
         else
-            control = Window.WindTabs.Main:Toggle({ Title = widget.label, Value = widget._isOn, Callback = click })
+            control = Window.GetSection("Settings", "Keybinds")
+                :Toggle({ Title = widget.label, Value = widget._isOn, Callback = click })
         end
         function widget.setToggleState(value, label)
             widget._isOn = value == true
@@ -2621,7 +2642,7 @@ do -- AsterPostUI: scoped block avoids main-chunk local register limit
             button:SetTitle(labelText .. ": " .. tostring(key or "Click to bind"))
             return
         end
-        button = Window.WindTabs.Settings:Button({
+        button = Window.GetSection("Settings", "Keybinds"):Button({
             Title = labelText,
             Callback = function()
                 ToggleBind.activeCapture = { setKey = setKey, refresh = refresh }
@@ -2631,7 +2652,7 @@ do -- AsterPostUI: scoped block avoids main-chunk local register limit
         })
         local removeButton
         if opts.removable then
-            removeButton = Window.WindTabs.Settings:Button({
+            removeButton = Window.GetSection("Settings", "Keybinds"):Button({
                 Title = "Remove " .. labelText .. " keybind",
                 Callback = function()
                     Settings.SelectedToggleKeybinds[opts.toggleName] = nil
@@ -3220,7 +3241,7 @@ do -- AsterGameCore: scoped block avoids main-chunk local register limit
         ZoomDistance = 100,
 
         -- Visuals (Theme)
-        CurrentThemeName = "Starfield",
+        CurrentThemeName = "Dark",
 
         -- Resource Aura
         ResourceAuraEnabled = false,
@@ -5031,15 +5052,7 @@ do -- AsterGameCore: scoped block avoids main-chunk local register limit
     end
 
     function tweenToWaypoint(hrp, hum, target, speed)
-        removeAlignPosition()
-        plantRemoveAlign()
-        if hrp then
-            removeBodyVelocity(hrp)
-            plantRemoveBodyVelocity(hrp)
-        end
-        isTweening = false
-        plantIsTweening = false
-        return boogaMoveTo(hrp, hum, target, speed)
+        return boogaMoveTo(hrp, hum, target, speed, "Tween", "Gold")
     end
 
     function stopAutoPlacementMovement(hrp, hum)
@@ -5065,15 +5078,7 @@ do -- AsterGameCore: scoped block avoids main-chunk local register limit
     end
 
     function walkToWaypoint(hrp, hum, target, speed)
-        removeAlignPosition()
-        plantRemoveAlign()
-        if hrp then
-            removeBodyVelocity(hrp)
-            plantRemoveBodyVelocity(hrp)
-        end
-        isTweening = false
-        plantIsTweening = false
-        return boogaMoveTo(hrp, hum, target, speed)
+        return boogaMoveTo(hrp, hum, target, speed, "Walk", "Gold")
     end
 
     function plantCreateAlign(hrp)
@@ -5114,15 +5119,7 @@ do -- AsterGameCore: scoped block avoids main-chunk local register limit
     end
 
     function plantTweenToTarget(hrp, hum, target, speed)
-        removeAlignPosition()
-        plantRemoveAlign()
-        if hrp then
-            removeBodyVelocity(hrp)
-            plantRemoveBodyVelocity(hrp)
-        end
-        isTweening = false
-        plantIsTweening = false
-        return boogaMoveTo(hrp, hum, target, speed)
+        return boogaMoveTo(hrp, hum, target, speed, "Tween", "Plant")
     end
 
     function plantUpdateTarget(hrp, hum, target, speed)
@@ -5133,21 +5130,13 @@ do -- AsterGameCore: scoped block avoids main-chunk local register limit
     local _walkMaxTorque = Vector3.new(math.huge, math.huge, math.huge)
 
     function smoothWalkToTarget(hrp, hum, target, speed)
-        removeAlignPosition()
-        plantRemoveAlign()
-        if hrp then
-            removeBodyVelocity(hrp)
-            plantRemoveBodyVelocity(hrp)
-        end
-        isTweening = false
-        plantIsTweening = false
-        return boogaMoveTo(hrp, hum, target, speed)
+        return boogaMoveTo(hrp, hum, target, speed, "Walk", "Plant")
     end
 
     local _zeroVec = Vector3.new(0, 0, 0)
 
     function plantStopMovement()
-        boogaStopMovement()
+        boogaStopMovement("Plant")
         if not plantIsTweening and not waterTweenActive then
             return
         end
@@ -5798,7 +5787,7 @@ do -- AsterGameCore: scoped block avoids main-chunk local register limit
                 end
             end
 
-            cachedShouldTween = false
+            cachedShouldTween = Settings.GoldMovementMode ~= "Walk"
             if cachedShouldTween then
                 if cachedTweenReason == "Water" then
                     waterTweenActive = true
@@ -6049,7 +6038,7 @@ do -- AsterGameCore: scoped block avoids main-chunk local register limit
 
     local goldActive = false
     function stopGoldCircuit()
-        boogaStopMovement()
+        boogaStopMovement("Gold")
         boogaSetSpeed(
             plr.Character and plr.Character:FindFirstChildOfClass("Humanoid"),
             Settings.WalkSpeedEnabled and Settings.WalkSpeed or 16
@@ -6087,7 +6076,7 @@ do -- AsterGameCore: scoped block avoids main-chunk local register limit
             return
         end
         goldActive = true
-        Settings.GoldSpeed = math.clamp(tonumber(Settings.GoldSpeed) or 16, 1, 16)
+        Settings.GoldSpeed = math.clamp(tonumber(Settings.GoldSpeed) or 16, 1, 26)
         Settings.GoldDelay = math.max(tonumber(Settings.GoldDelay) or 0.25, 0.25)
         WALK_SPEED = Settings.GoldSpeed
         local hum = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
@@ -7257,7 +7246,7 @@ do -- AsterPathFinder: scoped block avoids main-chunk local register limit
     end
 
     function pathFinderStand(hrp, hum)
-        boogaStopMovement()
+        boogaStopMovement("Path")
         if plantStopMovement then
             plantStopMovement()
         end
@@ -7281,15 +7270,7 @@ do -- AsterPathFinder: scoped block avoids main-chunk local register limit
     end
 
     function pathWalkToTarget(hrp, hum, target, speed)
-        removeAlignPosition()
-        plantRemoveAlign()
-        if hrp then
-            removeBodyVelocity(hrp)
-            plantRemoveBodyVelocity(hrp)
-        end
-        isTweening = false
-        plantIsTweening = false
-        return boogaMoveTo(hrp, hum, target, speed)
+        return boogaMoveTo(hrp, hum, target, speed, "Walk", "Path")
     end
 
     function startPathFinder()
@@ -20271,7 +20252,7 @@ do -- AsterStaffDetection: scoped block avoids local register limit
     end
 
     local function getStaffAlertThemeColors()
-        local theme = CurrentTheme or Themes.Premium or Themes.Starfield
+        local theme = CurrentTheme
         return {
             background = UI.Surface.Card,
             accent = theme.Main,
@@ -21668,13 +21649,13 @@ do -- AsterTabUI: scoped block avoids main-chunk local register limit
         return
     end)
     ASTER.Tabs.Main:AddSlider(
-        "Tween Speed",
+        "Route Speed",
         1,
-        25,
-        math.clamp(tonumber(Settings.GoldSpeed) or 16, 1, 25),
+        26,
+        math.clamp(tonumber(Settings.GoldSpeed) or 16, 1, 26),
         1,
         function(v)
-            Settings.GoldSpeed = math.clamp(tonumber(v) or 16, 1, 25)
+            Settings.GoldSpeed = math.clamp(tonumber(v) or 16, 1, 26)
             WALK_SPEED = Settings.GoldSpeed
             if Settings.GoldCircuitEnabled and not Settings.WalkSpeedEnabled then
                 boogaSetSpeed(plr.Character and plr.Character:FindFirstChildOfClass("Humanoid"), Settings.GoldSpeed)
@@ -21700,9 +21681,9 @@ do -- AsterTabUI: scoped block avoids main-chunk local register limit
 
         return
     end)
-    ASTER.Tabs.Main:AddToggle("Tween Only (Recommended)", false, function(v)
-        Settings.TweenOnly = v
-
+    ASTER.Tabs.Main:AddDropdown("Route Movement", { "Walk", "Tween" }, "Tween", function(value)
+        Settings.GoldMovementMode = value
+        boogaStopMovement("Gold")
         return
     end)
 end
@@ -24866,7 +24847,7 @@ do -- AsterKeybindOverlay: scoped block avoids main-chunk local register limit
                 KO.rows[entry.name]:SetTitle(title)
             else
                 local name = entry.name
-                KO.rows[name] = Window.WindTabs.Settings:Button({
+                KO.rows[name] = Window.GetSection("Settings", "Keybinds"):Button({
                     Title = title,
                     Desc = "Clear keybind",
                     Callback = function()
@@ -27735,13 +27716,13 @@ do -- AsterPlantingTabUI: scoped block avoids main-chunk local register limit
         end
     )
     ASTER.Tabs.Planting:AddSlider(
-        "Tween Speed",
+        "Planting Speed",
         1,
-        16,
-        math.clamp(tonumber(Settings.PlantingTweenSpeed) or 16, 1, 16),
+        26,
+        math.clamp(tonumber(Settings.PlantingTweenSpeed) or 16, 1, 26),
         1,
         function(v)
-            Settings.PlantingTweenSpeed = math.clamp(tonumber(v) or 16, 1, 16)
+            Settings.PlantingTweenSpeed = math.clamp(tonumber(v) or 16, 1, 26)
 
             return
         end
@@ -30171,7 +30152,7 @@ do
         if not actionPanel or spectateButton then
             return
         end
-        spectateButton = Window.WindTabs.Visuals:Button({
+        spectateButton = Window.GetSection("Visuals", "Players"):Button({
             Title = "Spectate selected player",
             Callback = function()
                 local targetPlayer = getActionPanelTargetPlayer(getActionPanel())
@@ -30488,63 +30469,27 @@ do
         return
     end)
 
-    ASTER.Tabs.Settings:AddLabel("Themes")
-    -- Existing theme buttons
-    ASTER.Tabs.Settings:AddButton("Theme: Nebula", function()
-        Settings.CurrentThemeName = "Nebula"
-        Window:UpdateTheme(Themes.Nebula)
-
+    ASTER.Tabs.Settings:AddLabel("Interface")
+    local nativeThemes = {}
+    for name in pairs(__ASTER_WINDUI:GetThemes()) do
+        table.insert(nativeThemes, name)
+    end
+    table.sort(nativeThemes)
+    ASTER.Tabs.Settings:AddDropdown("WindUI Theme", nativeThemes, "Dark", function(name)
+        Window:UpdateTheme(name)
         return
     end)
-
-    ASTER.Tabs.Settings:AddButton("Theme: Midnight", function()
-        Settings.CurrentThemeName = "Midnight"
-        Window:UpdateTheme(Themes.Midnight)
-
-        return
-    end)
-
-    ASTER.Tabs.Settings:AddButton("Theme: Acid", function()
-        Settings.CurrentThemeName = "Acid"
-        Window:UpdateTheme(Themes.Acid)
-
-        return
-    end)
-
-    ASTER.Tabs.Settings:AddButton("Theme: Sunset", function()
-        Settings.CurrentThemeName = "Sunset"
-        Window:UpdateTheme(Themes.Sunset)
-
-        return
-    end)
-
-    -- Starfield (Best Readability)
-    ASTER.Tabs.Settings:AddButton("Theme: Starfield", function()
-        Settings.CurrentThemeName = "Starfield"
-        Window:UpdateTheme(Themes.Starfield)
-
-        return
-    end)
-
-    ASTER.Tabs.Settings:AddButton("Theme: Premium (Default)", function()
-        Settings.CurrentThemeName = "Premium"
-        Window:UpdateTheme(Themes.Premium)
-
-        return
-    end)
-
-    -- Register Theme for Config System
     Window.ElementRegistry["SavedTheme"] = {
         Type = "Custom",
         GetValue = function()
-            return Settings.CurrentThemeName
+            return __ASTER_WINDUI:GetCurrentTheme()
         end,
-        SetValue = function(v)
-            if Themes[v] then
-                Settings.CurrentThemeName = v
-                Window:UpdateTheme(Themes[v])
+        SetValue = function(first, second)
+            local name = type(first) == "table" and second or first
+            if not __ASTER_WINDUI:GetThemes()[name] then
+                name = "Dark"
             end
-
+            Window.ElementRegistry["WindUI Theme"].SetValue(name)
             return
         end,
     }
@@ -30558,25 +30503,6 @@ do
     end)
     ASTER.Tabs.Settings:AddToggle("Transparency Mode", false, function(s)
         Window:UpdateTransparency(s and 0.45 or 0)
-
-        return
-    end)
-
-    ASTER.Tabs.Settings:AddToggle("Gradients", true, function(s)
-        GradientsEnabled = s
-
-        if not CurrentTheme then
-            -- Fallback if CurrentTheme is nil
-            if Themes and Themes.Starfield then
-                CurrentTheme = Themes.Starfield
-            end
-        end
-
-        if CurrentTheme then
-            Window:UpdateTheme(CurrentTheme)
-        else
-            boogaNotify("Cannot toggle gradients: CurrentTheme is nil")
-        end
 
         return
     end)
@@ -30612,7 +30538,7 @@ do -- AsterFinalize: scoped block avoids main-chunk local register limit
     boogaStartMovement()
 
     startWalkSpeedEnforcer()
-    Window:UpdateTheme(Themes.Premium)
+    Window:UpdateTheme(Settings.CurrentThemeName or "Dark")
     Window_ApplyCompactMode()
     __ASTER_WINDWINDOW:SelectTab(1)
     __ASTER_WINDWINDOW:Open()
