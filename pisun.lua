@@ -1532,7 +1532,7 @@ end
 function Window_ApplyMobileLayout()
     if __ASTER_WINDWINDOW then
         local viewport = workspace.CurrentCamera.ViewportSize
-        __ASTER_WINDWINDOW:SetSize(UDim2.fromOffset(math.min(760, viewport.X - 24), math.min(560, viewport.Y - 24)))
+        __ASTER_WINDWINDOW:SetSize(UDim2.fromOffset(math.min(820, viewport.X - 24), math.min(560, viewport.Y - 24)))
     end
     return
 end
@@ -1541,7 +1541,7 @@ function Window_ApplyCompactMode()
     if __ASTER_WINDWINDOW then
         local viewport = workspace.CurrentCamera.ViewportSize
         local height = UISettings.CompactMode and 460 or 560
-        __ASTER_WINDWINDOW:SetSize(UDim2.fromOffset(math.min(760, viewport.X - 24), math.min(height, viewport.Y - 24)))
+        __ASTER_WINDWINDOW:SetSize(UDim2.fromOffset(math.min(820, viewport.X - 24), math.min(height, viewport.Y - 24)))
     end
     return
 end
@@ -1758,15 +1758,15 @@ do -- WindUI controls and configuration bindings
         end)
     end
     local WindWindow = WindUI:CreateWindow({
-        Title = "Booga Booga",
+        Title = "BOOGA / UI 3.0",
         Icon = "gamepad-2",
-        Author = "Assistant",
+        Author = "Control Center",
         NewElements = true,
         ElementsRadius = 12,
-        HidePanelBackground = true,
-        ShadowTransparency = 0.72,
+        HidePanelBackground = false,
+        ShadowTransparency = 0.5,
         Folder = "BoogaWindUI",
-        Size = UDim2.fromOffset(760, 560),
+        Size = UDim2.fromOffset(820, 560),
         Transparent = true,
         Theme = savedTheme,
         SideBarWidth = 170,
@@ -1862,6 +1862,92 @@ do -- WindUI controls and configuration bindings
     for _, name in ipairs(tabOrder) do
         tabs[name] = WindWindow:Tab({ Title = name, Icon = tabIcons[name] })
         tabs[name].Gap = 7
+    end
+    local introductions = {
+        Main = { "CONTROL CENTER", "UI 3.0  /  Быстрые действия и переходы" },
+        Farm = {
+            "FARM & ROUTES",
+            "Маршруты, ресурсы, подбор и посадка — каждый инструмент в своей группе.",
+        },
+        Combat = {
+            "COMBAT",
+            "Выберите цель, настройте бой и лечение. Инструменты лука находятся отдельно.",
+        },
+        Visuals = {
+            "WORLD OVERLAY",
+            "Игроки, объекты мира и палитра ESP. Настройки влияют только на выбранную категорию.",
+        },
+        Movement = {
+            "MOVEMENT",
+            "Скорость, перемещение и камера. Настройки маршрутов находятся во вкладке Farm.",
+        },
+        Misc = {
+            "WORKSHOP",
+            "Крафт, магазин, племя и вспомогательная автоматизация.",
+        },
+        Settings = {
+            "PERSONALIZATION",
+            "Темы WindUI, горячие клавиши и сохранённые конфигурации.",
+        },
+    }
+    for _, name in ipairs(tabOrder) do
+        local heading = introductions[name]
+        tabs[name]:Paragraph({ Title = heading[1], Desc = heading[2] })
+        tabs[name]:Space({ Columns = 1 })
+    end
+    tabs.Main:Section({ Title = "РАБОЧИЕ ОБЛАСТИ", Icon = "layout-dashboard", TextSize = 18 })
+    local destinations = {
+        { "Farm", "Маршруты и сбор", "wheat", 2 },
+        { "Combat", "Цели и лечение", "swords", 3 },
+        { "Visuals", "ESP и цвета", "eye", 4 },
+        { "Movement", "Скорость и камера", "footprints", 5 },
+        { "Misc", "Крафт и автоматизация", "puzzle", 6 },
+        { "Settings", "Тема и клавиши", "sliders-horizontal", 7 },
+    }
+    for start = 1, #destinations, 2 do
+        local row = tabs.Main:Group({})
+        for i = start, math.min(start + 1, #destinations) do
+            local destination = destinations[i]
+            local index = destination[4]
+            row:Button({
+                Title = destination[1],
+                Desc = destination[2],
+                Icon = destination[3],
+                IconAlign = "Left",
+                Callback = function()
+                    WindWindow:SelectTab(index)
+                    return
+                end,
+            })
+        end
+    end
+    tabs.Main:Space({ Columns = 2 })
+    tabs.Main:Section({ Title = "БЫСТРЫЕ ДЕЙСТВИЯ", Icon = "zap", TextSize = 18 })
+    local actions = {
+        { "Автоподбор", "Auto Pickup Items", "hand" },
+        { "ESP игроков", "Player ESP", "eye" },
+        { "Маршрут", "Start Tween", "route" },
+        { "Скорость", "Enable WalkSpeed", "gauge" },
+    }
+    for start = 1, #actions, 2 do
+        local row = tabs.Main:Group({})
+        for i = start, math.min(start + 1, #actions) do
+            local action = actions[i]
+            row:Button({
+                Title = action[1],
+                Desc = "Включить / выключить",
+                Icon = action[3],
+                IconAlign = "Left",
+                Callback = function()
+                    local entry = Window.ElementRegistry[action[2]]
+                    if entry then
+                        entry.SetValue(not entry.GetValue())
+                        boogaNotify(action[1] .. (entry.GetValue() and ": включено" or ": выключено"))
+                    end
+                    return
+                end,
+            })
+        end
     end
     local function groupName(title)
         if title == "Gold & Paths" or title == "Farming" or title == "Loot & Chests" then
@@ -2042,8 +2128,16 @@ do -- WindUI controls and configuration bindings
                 Performance = "sliders-horizontal",
             }
             local tab = tabs[tabName]
-            tab:Space({ Columns = 1 })
-            tab:Section({ Title = title, Icon = icons[title] or "settings-2", TextXAlignment = "Left", TextSize = 18 })
+            tab:Space({ Columns = 2 })
+            tab:Divider()
+            tab:Section({
+                Title = title,
+                Icon = icons[title] or "settings-2",
+                TextXAlignment = "Left",
+                TextSize = 20,
+                Box = true,
+                BoxBorder = true,
+            })
             groups[key] = tab:VStack({})
         end
         return groups[key]
