@@ -70,6 +70,7 @@ local Window = WindUI:CreateWindow({
 local runtime = { Connections = {}, Drawings = {}, Highlights = {}, Circle = nil, Destroyed = false }
 environment[Config.RuntimeKey] = runtime
 local aimKeyControl
+local aimMouseButtons = { MouseLeftButton = false, MouseRightButton = false }
 local circleControls = {}
 
 local function getPlayers()
@@ -397,14 +398,32 @@ local function aimHeld()
     end
     Config.AimKey = aimKeyControl.Value
     if Config.AimKey == "MouseLeftButton" then
-        return UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+        return aimMouseButtons.MouseLeftButton or UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
     end
     if Config.AimKey == "MouseRightButton" then
-        return UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+        return aimMouseButtons.MouseRightButton or UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
     end
     local key = Enum.KeyCode[Config.AimKey]
     return key ~= nil and UserInputService:IsKeyDown(key)
 end
+
+table.insert(runtime.Connections, UserInputService.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        aimMouseButtons.MouseLeftButton = true
+    elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+        aimMouseButtons.MouseRightButton = true
+    end
+    return
+end))
+
+table.insert(runtime.Connections, UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        aimMouseButtons.MouseLeftButton = false
+    elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+        aimMouseButtons.MouseRightButton = false
+    end
+    return
+end))
 
 local function setCircle(value)
     if Config.ShowFOV == value then
