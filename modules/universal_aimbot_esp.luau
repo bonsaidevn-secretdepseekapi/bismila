@@ -26,6 +26,11 @@ local Config = {
     WallCheck = true,
     ESP = { Box = false, Name = false, Health = false, Distance = false, Tracer = false },
     ESPOrder = { "Box", "Name", "Health", "Distance", "Tracer" },
+    HighlightEnabled = true,
+    HighlightFill = Color3.fromRGB(255, 0, 0),
+    HighlightOutline = Color3.fromRGB(255, 255, 255),
+    HighlightFillTransparency = 0.35,
+    HighlightOutlineTransparency = 0,
     ESPColor = Color3.fromRGB(80, 220, 255),
     HealthColor = Color3.fromRGB(80, 230, 100),
     HealthBackground = Color3.fromRGB(25, 25, 25),
@@ -62,7 +67,7 @@ local Window = WindUI:CreateWindow({
     ToggleKey = Config.MenuKey,
 })
 
-local runtime = { Connections = {}, Drawings = {}, Circle = nil, Destroyed = false }
+local runtime = { Connections = {}, Drawings = {}, Highlights = {}, Circle = nil, Destroyed = false }
 environment[Config.RuntimeKey] = runtime
 local aimKeyControl
 local circleControls = {}
@@ -148,6 +153,22 @@ local function clearESP()
     return
 end
 
+local function clearHighlight(player)
+    local highlight = runtime.Highlights[player]
+    if highlight then
+        highlight:Destroy()
+        runtime.Highlights[player] = nil
+    end
+    return
+end
+
+local function clearHighlights()
+    for player in pairs(runtime.Highlights) do
+        clearHighlight(player)
+    end
+    return
+end
+
 local function clearCircle()
     removeDrawing(runtime.Circle)
     runtime.Circle = nil
@@ -164,6 +185,7 @@ function runtime.Destroy(closeWindow)
     end
     table.clear(runtime.Connections)
     clearESP()
+    clearHighlights()
     clearCircle()
     if environment[Config.RuntimeKey] == runtime then
         environment[Config.RuntimeKey] = nil
@@ -306,6 +328,31 @@ local function updateESP(player, camera)
     return
 end
 
+local function updateHighlight(player)
+    local character, humanoid, root = getCharacter(player)
+    if not Config.HighlightEnabled or not character or not humanoid or humanoid.Health <= 0 or not root then
+        clearHighlight(player)
+        return
+    end
+    local highlight = runtime.Highlights[player]
+    if not highlight or highlight.Parent == nil then
+        highlight = Instance.new("Highlight")
+        highlight.Name = "UniversalAimESPHighlight"
+        highlight.Adornee = character
+        highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+        highlight.Parent = game:GetService("CoreGui")
+        runtime.Highlights[player] = highlight
+    elseif highlight.Adornee ~= character then
+        highlight.Adornee = character
+    end
+    highlight.FillColor = Config.HighlightFill
+    highlight.OutlineColor = Config.HighlightOutline
+    highlight.FillTransparency = Config.HighlightFillTransparency
+    highlight.OutlineTransparency = Config.HighlightOutlineTransparency
+    highlight.Enabled = true
+    return
+end
+
 local function selectTarget(camera, cursor)
     local selected = nil
     local bestDistance = Config.FOV
@@ -408,6 +455,13 @@ end })
 table.insert(circleControls, Combat:Toggle({ Title = "Show FOV Circle", Value = Config.ShowFOV, Callback = setCircle }))
 
 Visuals:Section({ Title = "ESP", Icon = "scan-eye" })
+Visuals:Toggle({ Title = "Full Model Highlight", Value = Config.HighlightEnabled, Callback = function(value)
+    Config.HighlightEnabled = value
+    if not value then
+        clearHighlights()
+    end
+    return
+end })
 for _, name in ipairs(Config.ESPOrder) do
     local feature = name
     Visuals:Toggle({ Title = feature, Value = Config.ESP[feature], Callback = function(value)
@@ -442,6 +496,7 @@ table.insert(circleControls, Settings:Toggle({ Title = "Show FOV Circle", Value 
 
 table.insert(runtime.Connections, Players.PlayerRemoving:Connect(function(player)
     clearPlayer(player)
+    clearHighlight(player)
     return
 end))
 
@@ -483,6 +538,11 @@ table.insert(runtime.Connections, RunService.RenderStepped:Connect(function(delt
     if espEnabled then
         for _, player in ipairs(getPlayers()) do
             updateESP(player, camera)
+        end
+    end
+    if Config.HighlightEnabled then
+        for _, player in ipairs(getPlayers()) do
+            updateHighlight(player)
         end
     end
     return
