@@ -7,7 +7,7 @@ local Config = {
     SideBarWidth = 170,
     WindowSize = Vector2.new(620, 480),
     AimEnabled = false,
-    AimKey = "RightShift",
+    AimKey = "MouseRightButton",
     MenuKey = Enum.KeyCode.Insert,
     Mode = "Legit",
     Modes = { "Legit", "Semi", "Rage" },
@@ -215,7 +215,12 @@ local function playerDrawings(player)
 end
 
 local function getBounds(character, camera)
-    local frame, size = character:GetBoundingBox()
+    local ok, frame, size = pcall(function()
+        return character:GetBoundingBox()
+    end)
+    if not ok or not frame or not size then
+        return nil, nil
+    end
     local minimum = Vector2.new(math.huge, math.huge)
     local maximum = Vector2.new(-math.huge, -math.huge)
     for _, x in ipairs(Config.BoundsSigns) do
@@ -223,13 +228,15 @@ local function getBounds(character, camera)
             for _, z in ipairs(Config.BoundsSigns) do
                 local corner = frame:PointToWorldSpace(size * Vector3.new(x, y, z) / 2)
                 local screen = camera:WorldToScreenPoint(corner)
-                if screen.Z <= Config.MinDepth then
-                    return nil, nil
+                if screen.Z > Config.MinDepth then
+                    minimum = Vector2.new(math.min(minimum.X, screen.X), math.min(minimum.Y, screen.Y))
+                    maximum = Vector2.new(math.max(maximum.X, screen.X), math.max(maximum.Y, screen.Y))
                 end
-                minimum = Vector2.new(math.min(minimum.X, screen.X), math.min(minimum.Y, screen.Y))
-                maximum = Vector2.new(math.max(maximum.X, screen.X), math.max(maximum.Y, screen.Y))
             end
         end
+    end
+    if minimum.X == math.huge then
+        return nil, nil
     end
     return minimum, maximum
 end
@@ -240,19 +247,26 @@ local function updateESP(player, camera)
         clearPlayer(player)
         return
     end
-    local _, onScreen = camera:WorldToScreenPoint(root.Position)
+    local minimum, maximum = getBounds(character, camera)
+    if not minimum then
+        clearPlayer(player)
+        return
+    end
+    local viewport = camera.ViewportSize
+    if maximum.X < 0 or maximum.Y < 0 or minimum.X > viewport.X or minimum.Y > viewport.Y then
+        local existing = runtime.Drawings[player]
+        if existing then
+            for _, object in pairs(existing) do
+                object.Visible = false
+            end
+        end
+        return
+    end
     local drawings = runtime.Drawings[player]
     if drawings then
         for _, object in pairs(drawings) do
             object.Visible = false
         end
-    end
-    if not onScreen then
-        return
-    end
-    local minimum, maximum = getBounds(character, camera)
-    if not minimum then
-        return
     end
     drawings = playerDrawings(player)
     for _, object in pairs(drawings) do
@@ -318,7 +332,8 @@ local function selectTarget(camera, cursor)
                 local point, onScreen = camera:WorldToScreenPoint(part.Position)
                 if onScreen and point.Z > Config.MinDepth then
                     local distance = (Vector2.new(point.X, point.Y) - cursor).Magnitude
-                    if distance < bestDistance and (not Config.WallCheck or getVisible(part)) then
+                    local wallCheck = Config.WallCheck and Config.Mode ~= "Rage"
+                    if distance < bestDistance and (not wallCheck or getVisible(part)) then
                         bestDistance = distance
                         selected = part
                     end
