@@ -1532,7 +1532,7 @@ end
 function Window_ApplyMobileLayout()
     if __ASTER_WINDWINDOW then
         local viewport = workspace.CurrentCamera.ViewportSize
-        __ASTER_WINDWINDOW:SetSize(UDim2.fromOffset(math.min(820, viewport.X - 24), math.min(560, viewport.Y - 24)))
+        __ASTER_WINDWINDOW:SetSize(UDim2.fromOffset(math.min(580, viewport.X - 24), math.min(460, viewport.Y - 24)))
     end
     return
 end
@@ -1540,8 +1540,8 @@ end
 function Window_ApplyCompactMode()
     if __ASTER_WINDWINDOW then
         local viewport = workspace.CurrentCamera.ViewportSize
-        local height = UISettings.CompactMode and 460 or 560
-        __ASTER_WINDWINDOW:SetSize(UDim2.fromOffset(math.min(820, viewport.X - 24), math.min(height, viewport.Y - 24)))
+        local height = UISettings.CompactMode and 420 or 460
+        __ASTER_WINDWINDOW:SetSize(UDim2.fromOffset(math.min(580, viewport.X - 24), math.min(height, viewport.Y - 24)))
     end
     return
 end
@@ -1762,14 +1762,17 @@ do -- WindUI controls and configuration bindings
         Icon = "gamepad-2",
         Author = "Control Center",
         NewElements = true,
-        ElementsRadius = 12,
+        ElementsRadius = 23,
+        Radius = 20,
+        Topbar = { Height = 44, ButtonsType = "Mac" },
+        HideSearchBar = false,
         HidePanelBackground = false,
         ShadowTransparency = 0.5,
         Folder = "BoogaWindUI",
-        Size = UDim2.fromOffset(820, 560),
-        Transparent = true,
+        Size = UDim2.fromOffset(580, 460),
+        Transparent = false,
         Theme = savedTheme,
-        SideBarWidth = 170,
+        SideBarWidth = 200,
         ToggleKey = nil,
     })
     __ASTER_WINDUI = WindUI
@@ -5043,27 +5046,194 @@ do -- AsterGameCore: scoped block avoids main-chunk local register limit
         return
     end
 
+    -- Plant/Harvest share discovery without changing other packet consumers.
+    do
+        local packetFallback = {}
+        local nextPacketScan = 0
+        local farmRemote
+        local function validInteger(value, maximum)
+            local number = tonumber(value)
+            if number and number == number and number >= 1 and number <= maximum then
+                return math.floor(number)
+            end
+            return nil
+        end
+
+        function boogaFarmGetEntityId(model)
+            if not model then
+                return nil
+            end
+            for _, key in ipairs({ "EntityID", "EntityId", "NetworkId", "networkId", "NetworkID", "Eid", "UID", "uid", "ID", "Id" }) do
+                local id = validInteger(model:GetAttribute(key), 4294967295)
+                if id then
+                    return id
+                end
+            end
+            for _, child in ipairs(model:GetChildren()) do
+                if child:IsA("NumberValue") or child:IsA("IntValue") or child:IsA("StringValue") then
+                    local name = string.lower(child.Name)
+                    if string.find(name, "entity", 1, true) or string.find(name, "eid", 1, true) or name == "id" then
+                        local id = validInteger(child.Value, 4294967295)
+                        if id then
+                            return id
+                        end
+                    end
+                end
+            end
+            return nil
+        end
+
+        function boogaFarmGetByteNet()
+            if farmRemote and farmRemote.Parent then
+                return farmRemote
+            end
+            local remote = ReplicatedStorage:FindFirstChild("ByteNetReliable", true)
+            if remote and remote:IsA("RemoteEvent") then
+                farmRemote = remote
+                return remote
+            end
+            return nil
+        end
+
+        function boogaFarmGetPacketId(name)
+            local existing = validInteger(getPacketId(name), 255)
+            if existing then
+                return existing
+            end
+            local envIds = getAsterEnv().PACKET_IDS
+            local envId = type(envIds) == "table" and validInteger(envIds[name], 255)
+            if envId then
+                return envId
+            end
+            if os.clock() < nextPacketScan then
+                return packetFallback[name]
+            end
+            nextPacketScan = os.clock() + 20
+            local found = {}
+            local function merge(map)
+                if type(map) ~= "table" then
+                    return
+                end
+                for key, value in pairs(map) do
+                    local id = validInteger(value, 255)
+                    if type(key) == "string" and id then
+                        found[key] = id
+                    end
+                end
+                return
+            end
+            local okCache, cache = pcall(loadPacketIdCache)
+            if okCache then
+                merge(cache)
+            end
+            if type(readfile) == "function" and type(isfile) == "function" then
+                local okOwn, own = pcall(function()
+                    if isfile("booga_autoplant/ids.json") then
+                        return game:GetService("HttpService"):JSONDecode(readfile("booga_autoplant/ids.json"))
+                    end
+                    return nil
+                end)
+                if okOwn then
+                    merge(own)
+                end
+            end
+            local candidates = {}
+            local seen = {}
+            local function add(instance)
+                if instance and instance:IsA("ModuleScript") and not seen[instance] then
+                    seen[instance] = true
+                    table.insert(candidates, instance)
+                end
+                return
+            end
+            local modules = ReplicatedStorage:FindFirstChild("Modules")
+            if modules then
+                for _, key in ipairs({ "Packets", "packetIDs", "packetIds", "PacketIDs" }) do
+                    add(modules:FindFirstChild(key))
+                end
+                local byteNet = modules:FindFirstChild("ByteNet")
+                if byteNet then
+                    local packets = byteNet:FindFirstChild("packets") or byteNet
+                    for _, key in ipairs({ "packetIDs", "packetIds", "PacketIDs" }) do
+                        add(packets:FindFirstChild(key))
+                        add(byteNet:FindFirstChild(key))
+                    end
+                end
+                local count = 0
+                for _, instance in ipairs(modules:GetDescendants()) do
+                    if count >= 12 then
+                        break
+                    end
+                    if instance:IsA("ModuleScript") and string.find(string.lower(instance.Name), "packet", 1, true) then
+                        add(instance)
+                        count = count + 1
+                    end
+                end
+            end
+            add(ReplicatedStorage:FindFirstChild("Packets"))
+            add(ReplicatedStorage:FindFirstChild("packetIDs"))
+            local nameToObject = {}
+            local idToObject = {}
+            for _, instance in ipairs(candidates) do
+                local ok, result = pcall(require, instance)
+                if ok and type(result) == "table" then
+                    merge(result)
+                    for key, value in pairs(result) do
+                        if type(key) == "string" and type(value) == "table" then
+                            nameToObject[key] = value
+                            for _, field in ipairs({ "id", "Id", "ID", "_id", "packetId", "packetID", "PacketId", "PacketID" }) do
+                                local id = validInteger(value[field], 255)
+                                if id then
+                                    found[key] = id
+                                    break
+                                end
+                            end
+                        elseif type(key) == "number" then
+                            local id = validInteger(key, 255)
+                            if id and type(value) == "string" then
+                                found[value] = id
+                            elseif id and type(value) == "table" then
+                                idToObject[id] = value
+                            end
+                        end
+                    end
+                end
+            end
+            for key, object in pairs(nameToObject) do
+                for id, registered in pairs(idToObject) do
+                    if object == registered then
+                        found[key] = id
+                        break
+                    end
+                end
+            end
+            packetFallback = found
+            return packetFallback[name]
+        end
+    end
+
     local _plantBuf = buffer.create(8)
     function plant(eid, itemID)
-        if not ByteNetReliable then
-            return
+        local remote = boogaFarmGetByteNet()
+        if not remote then
+            return false
         end
-        local interactPacketId = getPacketId("InteractStructure")
+        local interactPacketId = boogaFarmGetPacketId("InteractStructure")
         if not interactPacketId then
-            return
+            return false
         end
         buffer.writeu8(_plantBuf, 0, 0)
         buffer.writeu8(_plantBuf, 1, interactPacketId)
         buffer.writeu32(_plantBuf, 2, eid)
         buffer.writeu16(_plantBuf, 6, itemID)
-        ByteNetReliable:FireServer(_plantBuf)
+        remote:FireServer(_plantBuf)
         plantedboxes[eid] = os.clock()
         local ws = __ASTER_RUNTIME.webhookStats
         if ws then
             ws.planted = (ws.planted or 0) + 1
         end
 
-        return
+        return true
     end
 
     function performRebirth()
@@ -13286,42 +13456,89 @@ do -- AsterEatFuelPlantHarvest: scoped block avoids main-chunk local register li
 end -- AsterFuelQuickHut
 
 do -- AsterPlantHarvestRuntime: scoped block avoids main-chunk local register limit
+    local plantFarm = { fruitIndex = 0, cooldowns = {}, lastPrune = 0, lastNotice = 0 }
+    function plantFarm.notice(message)
+        if os.clock() - plantFarm.lastNotice >= 5 then
+            plantFarm.lastNotice = os.clock()
+            warn("[Booga] Auto Plant: " .. tostring(message))
+        end
+        return
+    end
+    function plantFarm.candidates(fruit)
+        return { fruit .. " Seed", fruit .. " Seeds", fruit .. "Seed", fruit .. "Seeds", "Seed of " .. fruit, fruit }
+    end
+    function plantFarm.itemMap()
+        local map = {}
+        local function merge(source)
+            if type(source) ~= "table" then
+                return
+            end
+            for key, value in pairs(source) do
+                local name, id = key, value
+                if type(key) == "number" and type(value) == "string" then
+                    name, id = value, key
+                end
+                if type(name) == "string" and type(id) == "number" and id == id and id > 0 and id < 65536 then
+                    map[name] = map[name] or math.floor(id)
+                end
+            end
+            return
+        end
+        local modules = ReplicatedStorage:FindFirstChild("Modules")
+        local module = modules and modules:FindFirstChild("ItemIDS")
+        if module and module:IsA("ModuleScript") then
+            local ok, result = pcall(require, module)
+            if ok then
+                merge(result)
+            end
+        end
+        merge(getAsterEnv().craftNameToID)
+        merge(craftNameToID)
+        merge(getAsterEnv().fruittoitemid)
+        merge(fruittoitemid)
+        return map
+    end
     local function resolvePlantItemId(fruitName, ItemIDS)
-        if not fruitName or fruitName == "" then
+        if type(fruitName) ~= "string" or fruitName == "" then
             return nil
         end
-        local cached = fruittoitemid[fruitName]
-        if type(cached) == "number" and cached > 0 then
-            return cached
+        for _, name in ipairs(plantFarm.candidates(fruitName)) do
+            if ItemIDS[name] then
+                return ItemIDS[name]
+            end
         end
-        if ItemIDS then
-            local id = ItemIDS[fruitName .. " Seed"] or ItemIDS[fruitName]
-            if type(id) == "number" and id > 0 then
+        local fruitLower = string.lower(fruitName)
+        for name, id in pairs(ItemIDS) do
+            local lower = string.lower(name)
+            if string.find(lower, fruitLower, 1, true) and string.find(lower, "seed", 1, true) then
                 return id
             end
         end
-        local id = autoDiscoverItemID(fruitName .. " Seed") or autoDiscoverItemID(fruitName)
-        if type(id) == "number" and id > 0 then
-            fruittoitemid[fruitName] = id
-            return id
-        end
         return nil
     end
-
     local function hasSeedInInventory(fruitName)
-        local mainGui = plr.PlayerGui:FindFirstChild("MainGui")
-        local list = mainGui
-            and mainGui:FindFirstChild("RightPanel")
-            and mainGui.RightPanel:FindFirstChild("Inventory")
-            and mainGui.RightPanel.Inventory:FindFirstChild("List")
+        local pg = plr:FindFirstChild("PlayerGui")
+        local main = pg and pg:FindFirstChild("MainGui")
+        local right = main and main:FindFirstChild("RightPanel")
+        local inventory = right and right:FindFirstChild("Inventory")
+        local list = inventory and inventory:FindFirstChild("List", true)
         if not list then
-            return true
+            return nil
         end
-        local want = { fruitName, fruitName .. " Seed" }
-        for _, item in ipairs(list:GetChildren()) do
-            if item:IsA("ImageLabel") then
-                for _, n in ipairs(want) do
-                    if item.Name == n then
+        for _, slot in ipairs(list:GetChildren()) do
+            local lower = string.lower(slot.Name)
+            for _, candidate in ipairs(plantFarm.candidates(fruitName)) do
+                if string.find(lower, string.lower(candidate), 1, true) then
+                    local amount = nil
+                    for _, label in ipairs(slot:GetDescendants()) do
+                        if label:IsA("TextLabel") then
+                            local count = tonumber(string.match(label.Text or "", "%d+"))
+                            if count then
+                                amount = math.max(amount or count, count)
+                            end
+                        end
+                    end
+                    if amount == nil or amount > 0 then
                         return true
                     end
                 end
@@ -13329,24 +13546,159 @@ do -- AsterPlantHarvestRuntime: scoped block avoids main-chunk local register li
         end
         return false
     end
-
     local function pickPlantFruitForBox(fruitsToPlant, startIdx, ItemIDS)
-        local n = #fruitsToPlant
-        if n == 0 then
-            return nil, nil, startIdx
-        end
-        for offset = 0, n - 1 do
-            local idx = ((startIdx + offset - 1) % n) + 1
-            local fruitName = fruitsToPlant[idx]
-            if hasSeedInInventory(fruitName) then
-                local itemID = resolvePlantItemId(fruitName, ItemIDS)
-                if itemID then
-                    return fruitName, itemID, idx
-                end
+        for offset = 0, #fruitsToPlant - 1 do
+            local index = ((startIdx + offset - 1) % #fruitsToPlant) + 1
+            local fruit = fruitsToPlant[index]
+            local id = resolvePlantItemId(fruit, ItemIDS)
+            if id and hasSeedInInventory(fruit) ~= false then
+                return fruit, id, index
             end
         end
         return nil, nil, startIdx
     end
+    function plantFarm.hasSeed(model)
+        for _, child in ipairs(model:GetChildren()) do
+            local lower = string.lower(child.Name)
+            if string.find(lower, "seed", 1, true) or lower == "plant" or lower == "crop" then
+                return true
+            end
+            if child:IsA("Model") or child:IsA("Folder") then
+                for _, nested in ipairs(child:GetChildren()) do
+                    if string.find(string.lower(nested.Name), "seed", 1, true) then
+                        return true
+                    end
+                end
+            end
+        end
+        return false
+    end
+    function plantFarm.isBox(model, map)
+        local lower = string.lower(model.Name)
+        for _, token in ipairs({ "plant box", "plantbox", "plant_box", "plant-box", "planter", "plant pot", "plantpot" }) do
+            if string.find(lower, token, 1, true) then
+                return true
+            end
+        end
+        if string.find(lower, "plant", 1, true) and (string.find(lower, "box", 1, true) or string.find(lower, "pot", 1, true)) then
+            return true
+        end
+        local id = tonumber(model:GetAttribute("ItemID") or model:GetAttribute("itemID") or model:GetAttribute("StructureID"))
+        local boxId = map["Plant Box"] or map.PlantBox or map["Plant box"] or map.PlantBoxes
+        return id ~= nil and boxId ~= nil and math.floor(id) == boxId
+    end
+    function plantFarm.collectBoxes(origin, radius, map)
+        local found, seen, containers = {}, {}, {}
+        for _, child in ipairs(workspace:GetChildren()) do
+            local lower = string.lower(child.Name)
+            for _, hint in ipairs({ "deployables", "placestructures", "placeables", "structures", "models", "farm", "plantboxes" }) do
+                if string.find(lower, hint, 1, true) then
+                    table.insert(containers, child)
+                    break
+                end
+            end
+        end
+        local function consider(part)
+            local model = part
+            local resolved = nil
+            for _ = 1, 4 do
+                if not model or not model.Parent then
+                    break
+                end
+                if model:IsA("Model") and plantFarm.isBox(model, map) then
+                    resolved = model
+                    break
+                end
+                model = model.Parent
+            end
+            model = resolved or (plantFarm.isBox(part, map) and part or nil)
+            if not model or seen[model] or not plantFarm.isBox(model, map) then
+                return
+            end
+            seen[model] = true
+            local distance = (part.Position - origin).Magnitude
+            if distance <= radius then
+                table.insert(found, { model = model, part = part, dist = distance, eid = boogaFarmGetEntityId(model) })
+            end
+            return
+        end
+        local overlap = OverlapParams.new()
+        overlap.FilterType = Enum.RaycastFilterType.Include
+        overlap.FilterDescendantsInstances = containers
+        if #containers > 0 then
+            for _, part in ipairs(workspace:GetPartBoundsInRadius(origin, radius, overlap)) do
+                consider(part)
+            end
+        end
+        if #found == 0 then
+            overlap.FilterType = Enum.RaycastFilterType.Exclude
+            overlap.FilterDescendantsInstances = plr.Character and { plr.Character } or {}
+            for _, part in ipairs(workspace:GetPartBoundsInRadius(origin, radius, overlap)) do
+                consider(part)
+            end
+        end
+        table.sort(found, function(a, b)
+            return a.dist < b.dist
+        end)
+        return found
+    end
+    function plantFarm.tick(map)
+        if not Settings.PlantEnabled then
+            return 0
+        end
+        local character = plr.Character
+        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+        if not hrp then
+            return 0
+        end
+        if not boogaFarmGetPacketId("InteractStructure") or not boogaFarmGetByteNet() then
+            plantFarm.notice("InteractStructure / ByteNetReliable unavailable")
+            return 0
+        end
+        local now = os.clock()
+        if now - plantFarm.lastPrune >= 15 then
+            plantFarm.lastPrune = now
+            for eid, untilTime in pairs(plantFarm.cooldowns) do
+                if untilTime <= now then
+                    plantFarm.cooldowns[eid] = nil
+                end
+            end
+        end
+        local range = math.max(tonumber(Settings.PlantRange) or 20, 0)
+        local boxes = plantFarm.collectBoxes(hrp.Position, math.max(range, 140), map)
+        local fruits = getActivePlantFruits()
+        local sent = 0
+        for _, box in ipairs(boxes) do
+            if sent >= 8 or not Settings.PlantEnabled or __ASTER_RUNTIME.sessionId ~= CURRENT_SESSION then
+                break
+            end
+            if box.dist <= range and box.model.Parent and not plantFarm.hasSeed(box.model) then
+                local fruit, id, index = pickPlantFruitForBox(fruits, plantFarm.fruitIndex + 1, map)
+                if not id then
+                    plantFarm.notice("seed item ID unavailable or selected seeds absent from inventory")
+                    break
+                end
+                plantFarm.fruitIndex = index
+                if not box.eid then
+                    plantFarm.notice("Plant Box has no EntityID")
+                elseif (plantFarm.cooldowns[box.eid] or 0) <= os.clock() then
+                    if plr.Character ~= character or not hrp.Parent then
+                        break
+                    end
+                    if (box.part.Position - hrp.Position).Magnitude <= range and plant(box.eid, id) then
+                        plantFarm.cooldowns[box.eid] = os.clock() + 0.6
+                        sent = sent + 1
+                        task.wait(0.06)
+                    end
+                end
+            end
+        end
+        if #boxes == 0 then
+            plantFarm.notice("no Plant Boxes found nearby")
+        end
+        return sent
+    end
+
 
     local plantActive = false
 
@@ -13385,12 +13737,14 @@ do -- AsterPlantHarvestRuntime: scoped block avoids main-chunk local register li
         end
         plantActive = true
         task.spawn(function()
+            local setupOk, setupError = pcall(function()
             if not game:IsLoaded() then
                 game.Loaded:Wait()
             end
             task.wait(0.1)
 
-            local ItemIDS = require(game:GetService("ReplicatedStorage").Modules.ItemIDS)
+            local ItemIDS = plantFarm.itemMap()
+            local lastItemRefresh = os.clock()
             local clock = os.clock
 
             local overlapParams = OverlapParams.new()
@@ -13442,10 +13796,14 @@ do -- AsterPlantHarvestRuntime: scoped block avoids main-chunk local register li
             local smoothWalkLastDist = nil
             local smoothWalkAnchor = nil
 
-            while isPlantLoopActive() do
+            while isPlantLoopActive() and __ASTER_RUNTIME.sessionId == CURRENT_SESSION do
                 local plantedCount = 0
-                pcall(function()
-                    plantedCount = 0
+                local tickOk, tickError = pcall(function()
+                    if os.clock() - lastItemRefresh >= 20 then
+                        ItemIDS = plantFarm.itemMap()
+                        lastItemRefresh = os.clock()
+                    end
+                    plantedCount = plantFarm.tick(ItemIDS)
                     local char = plr.Character
                     local hrp = char and char:FindFirstChild("HumanoidRootPart")
                     if not hrp then
@@ -14088,16 +14446,6 @@ do -- AsterPlantHarvestRuntime: scoped block avoids main-chunk local register li
                             if itemID then
                                 fruitRotateIdx = newIdx
                                 local nearbyBoxes = scanCacheAroundPlayer()
-                                for _, entry in ipairs(nearbyBoxes) do
-                                    if
-                                        entry.model
-                                        and entry.model.Parent
-                                        and not entry.model:FindFirstChild("Seed")
-                                    then
-                                        plant(entry.eid, itemID)
-                                        plantedCount = plantedCount + 1
-                                    end
-                                end
 
                                 if
                                     smoothWalkTargetModel
@@ -14127,10 +14475,7 @@ do -- AsterPlantHarvestRuntime: scoped block avoids main-chunk local register li
                                             and smoothWalkTargetModel
                                             and smoothWalkTargetModel.Parent
                                         then
-                                            if not smoothWalkTargetModel:FindFirstChild("Seed") then
-                                                plant(smoothWalkTargetEid, itemID)
-                                                plantedCount = plantedCount + 1
-                                            else
+                                            if smoothWalkTargetModel:FindFirstChild("Seed") then
                                                 plantedboxes[smoothWalkTargetEid] = now
                                             end
                                             smoothWalkTargetEid = nil
@@ -14369,12 +14714,6 @@ do -- AsterPlantHarvestRuntime: scoped block avoids main-chunk local register li
                         if itemID then
                             fruitRotateIdx = newIdx
                             local nearbyBoxes, farEid, farModel, farVec = scanAroundPlayer()
-                            for _, entry in ipairs(nearbyBoxes) do
-                                if entry.model and entry.model.Parent and not entry.model:FindFirstChild("Seed") then
-                                    plant(entry.eid, itemID)
-                                    plantedCount = plantedCount + 1
-                                end
-                            end
 
                             if
                                 smoothWalkTargetModel
@@ -14402,10 +14741,7 @@ do -- AsterPlantHarvestRuntime: scoped block avoids main-chunk local register li
                                         and smoothWalkTargetModel
                                         and smoothWalkTargetModel.Parent
                                     then
-                                        if not smoothWalkTargetModel:FindFirstChild("Seed") then
-                                            plant(smoothWalkTargetEid, itemID)
-                                            plantedCount = plantedCount + 1
-                                        else
+                                        if smoothWalkTargetModel:FindFirstChild("Seed") then
                                             plantedboxes[smoothWalkTargetEid] = now
                                         end
                                         smoothWalkTargetEid = nil
@@ -14433,47 +14769,26 @@ do -- AsterPlantHarvestRuntime: scoped block avoids main-chunk local register li
                                 end
                             end
                         end
-                    elseif plantingEnabled and boxCount > 0 and not cacheWalking then
-                        local fruitName, itemID, newIdx =
-                            pickPlantFruitForBox(fruitsToPlant, fruitRotateIdx + 1, ItemIDS)
-                        if itemID then
-                            fruitRotateIdx = newIdx
-                            local maxPlantThisTick = math.min(boxCount, 8)
-                            for i = 1, boxCount do
-                                if not isPlantLoopActive() then
-                                    break
-                                end
-                                local model = boxModels[i]
-                                if model and model.Parent then
-                                    if not model:FindFirstChild("Seed") then
-                                        plant(boxEids[i], itemID)
-                                        plantedCount = plantedCount + 1
-                                    else
-                                        plantedboxes[boxEids[i]] = now
-                                    end
-                                end
-                                if plantedCount >= maxPlantThisTick then
-                                    break
-                                end
-                                if plantedCount > 0 and plantedCount % 4 == 0 then
-                                    task.wait()
-                                end
-                            end
-                        end
+
                     end
 
                     return
                 end)
 
-                local delay = math.max(tonumber(Settings.PlantDelay) or 0.05, 0.05)
-                if plantedCount > 0 then
-                    task.wait(math.max(delay, 0.08))
-                else
-                    task.wait(delay)
+                if not tickOk then
+                    plantFarm.notice(tickError)
                 end
+                task.wait(math.max(tonumber(Settings.PlantDelay) or 0.10, 0.10))
             end
-            plantStopMovement()
+            return
+            end)
             plantActive = false
+            if __ASTER_RUNTIME.sessionId == CURRENT_SESSION and not (Settings.TweenToPlantBox or Settings.TweenToBush or Settings.TweenToBushAndBox) then
+                pcall(plantStopMovement)
+            end
+            if not setupOk then
+                plantFarm.notice(setupError)
+            end
 
             return
         end)
@@ -14484,75 +14799,120 @@ end -- AsterPlantRuntime
 
 do -- AsterHarvestRuntime: scoped block avoids main-chunk local register limit
     local harvestActive = false
-    local _harvestItemIDCache = {}
+    local harvestNames = {
+        "bloodfruit", "bluefruit", "lemon", "coconut", "jelly", "banana", "orange",
+        "oddberry", "berry", "strangefruit", "strawberry", "sunfruit", "pumpkin",
+        "prickly pear", "pear cacti", "apple", "barley", "cloudberry", "carrot",
+        "corn", "blossom", "watermelon", "mango", "frostfruit", "crop", "crops",
+    }
+
+    local function isAutoHarvestModel(model)
+        local name = string.lower(model.Name)
+        for _, hint in ipairs(harvestNames) do
+            if string.find(name, hint, 1, true) then
+                return true
+            end
+        end
+        return false
+    end
+
     function startHarvest()
-        if harvestActive then
+        if harvestActive or not Settings.HarvestEnabled then
             return
         end
         harvestActive = true
         task.spawn(function()
-            local attemptedItems = {}
+            local ok, failure = pcall(function()
+                local attemptedItems = {}
+                local overlap = OverlapParams.new()
+                overlap.FilterType = Enum.RaycastFilterType.Include
+                local lastWarning = -math.huge
 
-            while Settings.HarvestEnabled do
-                local foundAny = false
-                pcall(function()
-                    local currentTime = tick()
-                    for item, attemptTime in pairs(attemptedItems) do
-                        if currentTime > attemptTime then
-                            attemptedItems[item] = nil
+                while Settings.HarvestEnabled and __ASTER_RUNTIME.sessionId == CURRENT_SESSION do
+                    local tickOk, tickError = pcall(function()
+                        local currentTime = os.clock()
+                        for eid, expires in pairs(attemptedItems) do
+                            if currentTime >= expires then
+                                attemptedItems[eid] = nil
+                            end
                         end
-                    end
-
-                    local range = tonumber(Settings.HarvestRange) or 25
-                    local items = getHarvestables(range)
-
-                    if #items > 0 then
-                        foundAny = true
-                        local rawBatch = tonumber(Settings.HarvestBatchSize) or 20
-                        local batchSize = math.min(math.clamp(rawBatch, 1, 25), #items)
+                        local pickupId = boogaFarmGetPacketId("Pickup")
+                        local remote = boogaFarmGetByteNet()
+                        if not pickupId or not remote then
+                            if currentTime - lastWarning >= 5 then
+                                lastWarning = currentTime
+                                warn("[Booga] Auto Harvest: Pickup packet or ByteNetReliable unavailable")
+                            end
+                            return
+                        end
+                        local character = plr.Character
+                        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+                        if not hrp or not hrp:IsA("BasePart") then
+                            return
+                        end
+                        local folders = {}
+                        for _, name in ipairs({ "Crops", "Resources" }) do
+                            local folder = workspace:FindFirstChild(name)
+                            if folder then
+                                folders[#folders + 1] = folder
+                            end
+                        end
+                        if #folders == 0 then
+                            return
+                        end
+                        overlap.FilterDescendantsInstances = folders
+                        local range = math.max(tonumber(Settings.HarvestRange) or 30, 1)
+                        local parts = workspace:GetPartBoundsInRadius(hrp.Position, range, overlap)
+                        local batchSize = math.clamp(math.floor(tonumber(Settings.HarvestBatchSize) or 20), 1, 200)
                         local harvestedCount = 0
-
-                        for _, item in ipairs(items) do
-                            if not Settings.HarvestEnabled or harvestedCount >= batchSize then
+                        local seen = {}
+                        for _, part in ipairs(parts) do
+                            if not Settings.HarvestEnabled or __ASTER_RUNTIME.sessionId ~= CURRENT_SESSION then
                                 break
                             end
-
-                            local eid = item.entityid
-                            if not eid and item.model then
-                                eid = getHarvestEntityId(item.model)
+                            if harvestedCount >= batchSize then
+                                break
                             end
-                            eid = math.floor(tonumber(eid) or 0)
-
-                            if eid > 0 and ByteNetReliable and not attemptedItems[eid] then
-                                attemptedItems[eid] = currentTime + 0.55
-                                if fireByteNetPickup(eid) then
-                                    harvestedCount = harvestedCount + 1
-                                    local modelName = item.model and item.model.Name or ""
-                                    local ws = __ASTER_RUNTIME.webhookStats
-                                    if ws then
-                                        ws.harvested = (ws.harvested or 0) + 1
+                            local model = part:FindFirstAncestorOfClass("Model")
+                            if model and not seen[model] then
+                                seen[model] = true
+                                if isAutoHarvestModel(model) then
+                                    local eid = boogaFarmGetEntityId(model)
+                                    if eid and not attemptedItems[eid] then
+                                        attemptedItems[eid] = currentTime + 0.22
+                                        local payload = buffer.create(6)
+                                        buffer.writeu8(payload, 0, 0)
+                                        buffer.writeu8(payload, 1, pickupId)
+                                        buffer.writeu32(payload, 2, eid)
+                                        remote:FireServer(payload)
+                                        harvestedCount = harvestedCount + 1
+                                        local stats = __ASTER_RUNTIME.webhookStats
+                                        if stats then
+                                            stats.harvested = (stats.harvested or 0) + 1
+                                        end
+                                        if __ASTER_RUNTIME.recordGrindGain then
+                                            __ASTER_RUNTIME.recordGrindGain(model.Name, 1)
+                                        end
                                     end
-                                    if modelName ~= "" and __ASTER_RUNTIME.recordGrindGain then
-                                        __ASTER_RUNTIME.recordGrindGain(modelName, 1)
-                                    end
-                                end
-
-                                if harvestedCount % 3 == 0 then
-                                    task.wait()
                                 end
                             end
                         end
+                        return
+                    end)
+                    if not tickOk and os.clock() - lastWarning >= 5 then
+                        lastWarning = os.clock()
+                        warn("[Booga] Auto Harvest: " .. tostring(tickError))
                     end
-
-                    return
-                end)
-                task.wait(foundAny and 0.28 or 0.7)
-            end
+                    task.wait(0.10)
+                end
+                return
+            end)
             harvestActive = false
-
+            if not ok then
+                warn("[Booga] Auto Harvest stopped: " .. tostring(failure))
+            end
             return
         end)
-
         return
     end
 end -- AsterEatFuelPlantHarvest
