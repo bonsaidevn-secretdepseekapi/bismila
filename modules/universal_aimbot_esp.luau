@@ -144,6 +144,11 @@ local function clearPlayer(player)
         end
         runtime.Drawings[player] = nil
     end
+    local highlight = runtime.Highlights[player]
+    if highlight and highlight.Parent then
+        highlight.Parent:Destroy()
+    end
+    runtime.Highlights[player] = nil
     return
 end
 
@@ -336,15 +341,17 @@ local function updateHighlight(player)
         return
     end
     local highlight = runtime.Highlights[player]
-    if not highlight or highlight.Parent == nil then
+    if not highlight or highlight.Parent == nil or highlight.Adornee ~= character then
+        clearHighlight(player)
+        local visualFolder = Instance.new("Folder")
+        visualFolder.Name = "UniversalAimESP"
+        visualFolder.Parent = character
         highlight = Instance.new("Highlight")
         highlight.Name = "UniversalAimESPHighlight"
         highlight.Adornee = character
         highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-        highlight.Parent = game:GetService("CoreGui")
+        highlight.Parent = visualFolder
         runtime.Highlights[player] = highlight
-    elseif highlight.Adornee ~= character then
-        highlight.Adornee = character
     end
     highlight.FillColor = Config.HighlightFill
     highlight.OutlineColor = Config.HighlightOutline
@@ -393,7 +400,7 @@ local function selectTarget(camera, cursor)
 end
 
 local function aimHeld()
-    if not aimKeyControl or aimKeyControl.Picking or UserInputService:GetFocusedTextBox() then
+    if not aimKeyControl or UserInputService:GetFocusedTextBox() then
         return false
     end
     Config.AimKey = aimKeyControl.Value
